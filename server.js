@@ -27,14 +27,22 @@ app.get("/manifest.json", (req, res) => {
   res.status(200);
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-  res.json({
-    id: "org.subtitlecat.serbianlatin",
-    version: "1.0.0",
-    name: "SubtitleCat Serbian Latin",
-    description: "SubtitleCat subtitles automatically translated to Serbian Latin",
-    resources: ["subtitles"],
-    types: ["movie", "series"],
-    idPrefixes: ["tt"]
+ res.json({
+  id: "org.subtitlecat.serbianlatin",
+  version: "1.0.0",
+  name: "SubtitleCat Serbian Latin",
+  description: "SubtitleCat subtitles automatically translated to Serbian Latin",
+  logo: "https://www.stremio.com/website/stremio-logo-small.png",
+  resources: [
+    {
+      name: "subtitles",
+      types: ["movie", "series"],
+      idPrefixes: ["tt"]
+    }
+  ],
+  types: ["movie", "series"],
+  idPrefixes: ["tt"]
+});
   });
 });
 
