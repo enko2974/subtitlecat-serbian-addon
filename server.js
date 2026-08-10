@@ -15,13 +15,22 @@ app.use((req, res, next) => {
 });
 
 /* =========================
+   CONFIG
+   ========================= */
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent";
+
+/* =========================
    STREMIO MANIFEST
    ========================= */
 
 app.get("/manifest.json", (req, res) => {
   res.json({
     id: "org.subtitlecat.serbianlatin",
-    version: "1.0.2",
+    version: "2.0.0",
     name: "SubtitleCat Serbian Latin",
     description:
       "SubtitleCat subtitles automatically translated to Serbian Latin",
@@ -32,46 +41,38 @@ app.get("/manifest.json", (req, res) => {
 });
 
 /* =========================
-   GEMINI API TEST
+   TEST GEMINI
    ========================= */
 
 app.get("/test-gemini", async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
+    if (!GEMINI_API_KEY) {
       return res.status(500).json({
         ok: false,
         error: "GEMINI_API_KEY is missing"
       });
     }
 
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: "Reply with exactly: GEMINI OK"
-                }
-              ]
-            }
-          ]
-        })
-      }
-    );
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: "Reply with exactly: GEMINI OK"
+              }
+            ]
+          }
+        ]
+      })
+    });
 
     const data = await response.json();
-
-    console.log("Gemini status:", response.status);
-    console.log("Gemini response:", JSON.stringify(data));
 
     if (!response.ok) {
       return res.status(response.status).json({
@@ -85,13 +86,10 @@ app.get("/test-gemini", async (req, res) => {
 
     res.json({
       ok: true,
-      message: text.trim(),
-      model: "gemini-3.5-flash"
+      message: text.trim()
     });
 
   } catch (error) {
-    console.error("GEMINI TEST ERROR:", error);
-
     res.status(500).json({
       ok: false,
       error: error.message
@@ -100,16 +98,9 @@ app.get("/test-gemini", async (req, res) => {
 });
 
 /* =========================
-   HOME / HEALTH CHECK
+   TEST SUBTITLECAT
    ========================= */
 
-app.get("/", (req, res) => {
-  res.send("SubtitleCat Serbian Latin proxy is running.");
-});
-
-/* =========================
-   SERVER
-   ========================= */
 app.get("/test-subtitlecat", async (req, res) => {
   try {
     const url =
@@ -131,6 +122,7 @@ app.get("/test-subtitlecat", async (req, res) => {
       length: text.length,
       containsMatrix: text.toLowerCase().includes("matrix")
     });
+
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -139,6 +131,17 @@ app.get("/test-subtitlecat", async (req, res) => {
   }
 });
 
+/* =========================
+   HOME
+   ========================= */
+
+app.get("/", (req, res) => {
+  res.send("SubtitleCat Serbian Latin proxy is running.");
+});
+
+/* =========================
+   SERVER
+   ========================= */
 
 const PORT = process.env.PORT || 3000;
 
