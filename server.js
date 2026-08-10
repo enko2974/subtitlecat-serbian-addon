@@ -10,6 +10,10 @@ const TRANSLATOR =
 
 app.disable('x-powered-by');
 
+/* =========================
+   CORS
+========================= */
+
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -22,9 +26,19 @@ app.use((req, res, next) => {
   next();
 });
 
+/* =========================
+   HOME
+========================= */
+
 app.get('/', (req, res) => {
-  res.type('text').send('SubtitleCat Serbian Latin addon is running.');
+  res.type('text').send(
+    'SubtitleCat Serbian Latin addon is running.'
+  );
 });
+
+/* =========================
+   HEALTH
+========================= */
 
 app.get('/health', (req, res) => {
   res.json({
@@ -33,6 +47,10 @@ app.get('/health', (req, res) => {
     version: '3.0.0'
   });
 });
+
+/* =========================
+   MANIFEST
+========================= */
 
 app.get('/manifest.json', (req, res) => {
   res.json({
@@ -55,6 +73,10 @@ app.get('/manifest.json', (req, res) => {
   });
 });
 
+/* =========================
+   HELPERS
+========================= */
+
 function cleanImdbId(id) {
   return String(id || '').split(':')[0];
 }
@@ -75,22 +97,33 @@ function getSeriesParts(id) {
   };
 }
 
+/* =========================
+   FETCH JSON
+========================= */
+
 async function fetchJson(url) {
   const response = await fetch(url, {
+    method: 'GET',
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-      Accept: 'application/json,text/plain,*/*'
+      'Accept': 'application/json,text/plain,*/*'
     },
     redirect: 'follow'
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${url}`);
+    throw new Error(
+      `HTTP ${response.status} for ${url}`
+    );
   }
 
-  return response.json();
+  return await response.json();
 }
+
+/* =========================
+   CINEMETA
+========================= */
 
 async function getMeta(type, id) {
   const cleanId = cleanImdbId(id);
@@ -105,75 +138,113 @@ async function getMeta(type, id) {
   try {
     const data = await fetchJson(url);
 
-    return data && data.meta ? data.meta : null;
+    if (data && data.meta) {
+      return data.meta;
+    }
+
+    return null;
   } catch (error) {
-    console.error('CINEMETA ERROR:', error.message);
+    console.error(
+      'CINEMETA ERROR:',
+      error.message
+    );
+
     return null;
   }
 }
 
+/* =========================
+   SEARCH QUERIES
+========================= */
+
 function buildSearchQueries(type, id, meta) {
-  const title = meta && meta.name ? meta.name : '';
-
-  const releaseInfo =
-    meta && meta.releaseInfo
-      ? String(meta.releaseInfo)
-      : '';
-
-  const yearMatch = releaseInfo.match(/\b(?:19|20)\d{2}\b/);
-  const year = yearMatch ? yearMatch[0] : '';
-
   const queries = [];
 
+  let title = '';
+  let year = '';
+
+  if (meta && meta.name) {
+    title = String(meta.name);
+  }
+
+  if (meta && meta.releaseInfo) {
+    const releaseInfo =
+      String(meta.releaseInfo);
+
+    const yearMatch =
+      releaseInfo.match(
+        /\b(?:19|20)\d{2}\b/
+      );
+
+    if (yearMatch) {
+      year = yearMatch[0];
+    }
+  }
+
+  if (type === 'series') {
+    const parts = getSeriesParts(id);
+
+    if (
+      title &&
+      parts.season &&
+      parts.episode
+    ) {
+      const season =
+        String(parts.season).padStart(2, '0');
+
+      const episode =
+        String(parts.episode).padStart(2, '0');
+
+      queries.push(
+        `${title} S${season}E${episode}`
+      );
+
+      if (year) {
+        queries.push(
+          `${title} ${year} S${season}E${episode}`
+        );
+      }
+    }
+  }
+
   if (title && year) {
-    queries.push(`${title} ${year}`);
+    queries.push(
+      `${title} ${year}`
+    );
   }
 
   if (title) {
     queries.push(title);
   }
 
-  if (type === 'series') {
-    const { season, episode } = getSeriesParts(id);
-
-    if (title && season && episode) {
-      const s = String(season).padStart(2, '0');
-      const e = String(episode).padStart(2, '0');
-
-      if (year) {
-        queries.unshift(
-          `${title} ${year} S${s}E${e}`
-        );
-      }
-
-      queries.unshift(
-        `${title} S${s}E${e}`
-      );
-    }
-  }
-
-  return [...new Set(queries)]
+  return [
+    ...new Set(queries)
+  ]
     .filter(Boolean)
     .slice(0, 4);
 }
 
+/* =========================
+   ABSOLUTE URL
+========================= */
+
 function absoluteUrl(link) {
   try {
-    return new URL(link, SUBTITLECAT).href;
+    return new URL(
+      link,
+      SUBTITLECAT
+    ).href;
   } catch (error) {
     return null;
   }
 }
 
+/* =========================
+   EXTRACT SUBTITLE LINKS
+========================= */
+
 function extractSubtitleLinks(html) {
   const results = [];
-
-  /*
-   * SubtitleCat subtitle detail pages normally contain
-   * links similar to:
-   *
-   * /subs/xxxxxx.html
-   */
 
   const regex =
     /href=["']([^"']*\/subs\/[^"']+\.html(?:\?[^"']*)?)["']/gi;
@@ -181,9 +252,13 @@ function extractSubtitleLinks(html) {
   let match;
 
   while ((match = regex.exec(html)) !== null) {
-    const link = absoluteUrl(match[1]);
+    const link =
+      absoluteUrl(match[1]);
 
-    if (link && !results.includes(link)) {
+    if (
+      link &&
+      !results.includes(link)
+    ) {
       results.push(link);
     }
 
@@ -195,29 +270,44 @@ function extractSubtitleLinks(html) {
   return results;
 }
 
+/* =========================
+   SUBTITLECAT SEARCH
+========================= */
+
 async function searchSubtitleCat(query) {
   const url =
     `${SUBTITLECAT}/index.php?search=` +
     `${encodeURIComponent(query)}&show=1000`;
 
-  console.log('SUBTITLECAT SEARCH:', url);
+  console.log(
+    'SUBTITLECAT SEARCH:',
+    url
+  );
 
   const response = await fetch(url, {
+    method: 'GET',
+
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-      Accept:
+
+      'Accept':
         'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
     },
+
     redirect: 'follow'
   });
 
-  const html = await response.text();
+  const html =
+    await response.text();
 
   console.log(
     'SUBTITLECAT STATUS:',
-    response.status,
-    'HTML:',
+    response.status
+  );
+
+  console.log(
+    'SUBTITLECAT HTML LENGTH:',
     html.length
   );
 
@@ -227,6 +317,10 @@ async function searchSubtitleCat(query) {
 
   return extractSubtitleLinks(html);
 }
+
+/* =========================
+   TRANSLATOR DOWNLOAD URL
+========================= */
 
 function makeDownloadUrl(detailUrl) {
   const name =
@@ -240,290 +334,387 @@ function makeDownloadUrl(detailUrl) {
   );
 }
 
-/*
- * STREMIO SUBTITLE ENDPOINT
- */
+/* =========================
+   STREMIO SUBTITLES
+========================= */
 
-app.get('/subtitles/:type/:id.json', async (req, res) => {
-  try {
-    const type = req.params.type;
-    const id = req.params.id;
+app.get(
+  '/subtitles/:type/:id.json',
+  async (req, res) => {
+    try {
+      const type =
+        req.params.type;
 
-    console.log('========================================');
-    console.log('STREMIO REQUEST:', type, id);
+      const id =
+        req.params.id;
 
-    if (!['movie', 'series'].includes(type)) {
-      return res.json({
-        subtitles: []
-      });
-    }
-
-    const meta = await getMeta(type, id);
-
-    const queries = buildSearchQueries(
-      type,
-      id,
-      meta
-    );
-
-    if (req.query.title) {
-      queries.unshift(
-        String(req.query.title)
+      console.log(
+        '========================================'
       );
-    }
 
-    if (queries.length === 0) {
-      queries.push('The Matrix 1999');
-    }
+      console.log(
+        'STREMIO REQUEST:',
+        type,
+        id
+      );
 
-    console.log(
-      'SEARCH QUERIES:',
-      queries
-    );
+      /* Only movie and series */
 
-    const links = [];
+      if (
+        type !== 'movie' &&
+        type !== 'series'
+      ) {
+        return res.json({
+          subtitles: []
+        });
+      }
 
-    for (const query of [...new Set(queries)]) {
-      try {
-        const found =
-          await searchSubtitleCat(query);
+      /* Get metadata */
 
-        for (const link of found) {
-          if (!links.includes(link)) {
-            links.push(link);
-          }
+      const meta =
+        await getMeta(type, id);
 
-          if (links.length >= 30) {
-            break;
-          }
-        }
-      } catch (error) {
-        console.error(
-          'SEARCH ERROR:',
-          error.message
+      /* Build search queries */
+
+      let queries =
+        buildSearchQueries(
+          type,
+          id,
+          meta
+        );
+
+      /* Manual title */
+
+      if (req.query.title) {
+        queries.unshift(
+          String(req.query.title)
         );
       }
 
-      if (links.length >= 30) {
-        break;
+      /* Fallback */
+
+      if (queries.length === 0) {
+        queries.push(
+          'The Matrix 1999'
+        );
       }
-    }
 
-    const subtitles = links.map(
-      (detailUrl, index) => ({
-        id:
-          `subtitlecat-srp-${index}`,
+      console.log(
+        'SEARCH QUERIES:',
+        queries
+      );
 
-        url:
-          makeDownloadUrl(detailUrl),
+      /* Search SubtitleCat */
 
-        lang: 'srp',
+      const links = [];
 
-        label:
-          '🇷🇸 Serbian Latin',
+      for (
+        const query of [...new Set(queries)]
+      ) {
+        try {
+          const found =
+            await searchSubtitleCat(
+              query
+            );
 
-        ...(type === 'series'
-          ? {
-              title: 'Serbian Latin'
+          for (
+            const link of found
+          ) {
+            if (
+              !links.includes(link)
+            ) {
+              links.push(link);
+            }
+
+            if (
+              links.length >= 30
+            ) {
+              break;
             }
           }
-          : {})
-      })
-    );
+        } catch (error) {
+          console.error(
+            'SEARCH ERROR:',
+            error.message
+          );
+        }
 
-    console.log(
-      'SUBTITLES FOUND:',
-      subtitles.length
-    );
+        if (
+          links.length >= 30
+        ) {
+          break;
+        }
+      }
 
-    res.setHeader(
-      'Cache-Control',
-      'public, max-age=300'
-    );
-
-    return res.json({
-      subtitles
-    });
-
-  } catch (error) {
-    console.error(
-      'SUBTITLE ERROR:',
-      error
-    );
-
-    return res
-      .status(200)
-      .json({
-        subtitles: []
-      });
-  }
-});
-
-/*
- * TEST SUBTITLECAT SEARCH
- *
- * Example:
- * /test-search?q=The%20Matrix%201999
- */
-
-app.get('/test-search', async (req, res) => {
-  try {
-    const query =
-      String(
-        req.query.q ||
-        'The Matrix 1999'
+      console.log(
+        'SUBTITLES FOUND:',
+        links.length
       );
 
-    const links =
-      await searchSubtitleCat(query);
+      /* Build Stremio subtitles */
 
-    return res.json({
-      ok: true,
-      query,
-      resultsFound: links.length,
-      results: links
-    });
+      const subtitles = [];
 
-  } catch (error) {
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        error: error.message
-      });
-  }
-});
+      for (
+        let index = 0;
+        index < links.length;
+        index++
+      ) {
+        const detailUrl =
+          links[index];
 
-/*
- * TEST TRANSLATOR
- *
- * Example:
- * /test-subtitle?detailUrl=https://subtitlecat.com/subs/xxxx.html
- */
+        const subtitle = {
+          id:
+            `subtitlecat-srp-${index}`,
 
-app.get('/test-subtitle', async (req, res) => {
-  try {
-    const detailUrl =
-      String(
-        req.query.detailUrl || ''
+          url:
+            makeDownloadUrl(
+              detailUrl
+            ),
+
+          lang: 'srp',
+
+          label:
+            '🇷🇸 Serbian Latin'
+        };
+
+        if (
+          type === 'series'
+        ) {
+          subtitle.title =
+            'Serbian Latin';
+        }
+
+        subtitles.push(
+          subtitle
+        );
+      }
+
+      /* Cache */
+
+      res.setHeader(
+        'Cache-Control',
+        'public, max-age=300'
       );
 
-    if (!detailUrl) {
+      return res.json({
+        subtitles: subtitles
+      });
+
+    } catch (error) {
+      console.error(
+        'SUBTITLE ERROR:',
+        error
+      );
+
       return res
-        .status(400)
+        .status(200)
         .json({
-          ok: false,
-          error: 'Missing detailUrl'
+          subtitles: []
         });
     }
-
-    const url =
-      makeDownloadUrl(detailUrl);
-
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0',
-        Accept: '*/*'
-      },
-      redirect: 'follow'
-    });
-
-    const body =
-      await response.text();
-
-    return res.json({
-      ok: response.ok,
-      status: response.status,
-      contentType:
-        response.headers.get(
-          'content-type'
-        ),
-      length: body.length,
-      preview: body.slice(0, 500)
-    });
-
-  } catch (error) {
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        error: error.message
-      });
   }
-});
+);
 
-/*
- * DEBUG SUBTITLECAT
- */
+/* =========================
+   TEST SEARCH
+========================= */
 
-app.get('/debug', async (req, res) => {
-  try {
-    const url =
-      `${SUBTITLECAT}/index.php?` +
-      `search=The%20Matrix%201999&show=1000`;
+app.get(
+  '/test-search',
+  async (req, res) => {
+    try {
+      const query =
+        String(
+          req.query.q ||
+          'The Matrix 1999'
+        );
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0'
-      },
-      redirect: 'follow'
-    });
+      const links =
+        await searchSubtitleCat(
+          query
+        );
 
-    const html =
-      await response.text();
+      return res.json({
+        ok: true,
+        query: query,
+        resultsFound:
+          links.length,
+        results: links
+      });
 
-    return res.json({
-      ok: true,
-      status: response.status,
-      finalUrl: response.url,
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          ok: false,
+          error: error.message
+        });
+    }
+  }
+);
 
-      contentType:
-        response.headers.get(
-          'content-type'
-        ),
+/* =========================
+   TEST TRANSLATOR
+========================= */
 
-      htmlLength:
-        html.length,
+app.get(
+  '/test-subtitle',
+  async (req, res) => {
+    try {
+      const detailUrl =
+        String(
+          req.query.detailUrl || ''
+        );
 
-      matrix:
-        html
-          .toLowerCase()
-          .includes('matrix'),
+      if (!detailUrl) {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            error:
+              'Missing detailUrl'
+          });
+      }
 
-      subtitleLinks:
-        html.includes('/subs/'),
+      const url =
+        makeDownloadUrl(
+          detailUrl
+        );
 
-      captcha:
-        html
-          .toLowerCase()
-          .includes('captcha'),
+      console.log(
+        'TRANSLATOR URL:',
+        url
+      );
 
-      cloudflare:
-        html
-          .toLowerCase()
-          .includes('cloudflare'),
+      const response =
+        await fetch(url, {
+          method: 'GET',
 
-      extractedLinks:
-        extractSubtitleLinks(
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0',
+            'Accept':
+              '*/*'
+          },
+
+          redirect: 'follow'
+        });
+
+      const body =
+        await response.text();
+
+      return res.json({
+        ok: response.ok,
+
+        status:
+          response.status,
+
+        contentType:
+          response.headers.get(
+            'content-type'
+          ),
+
+        length:
+          body.length,
+
+        preview:
+          body.slice(0, 500)
+      });
+
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          ok: false,
+          error: error.message
+        });
+    }
+  }
+);
+
+/* =========================
+   DEBUG
+========================= */
+
+app.get(
+  '/debug',
+  async (req, res) => {
+    try {
+      const url =
+        `${SUBTITLECAT}/index.php?` +
+        `search=The%20Matrix%201999&show=1000`;
+
+      const response =
+        await fetch(url, {
+          method: 'GET',
+
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0'
+          },
+
+          redirect: 'follow'
+        });
+
+      const html =
+        await response.text();
+
+      return res.json({
+        ok: true,
+
+        status:
+          response.status,
+
+        finalUrl:
+          response.url,
+
+        contentType:
+          response.headers.get(
+            'content-type'
+          ),
+
+        htmlLength:
+          html.length,
+
+        matrix:
           html
-        ).slice(0, 10)
-    });
+            .toLowerCase()
+            .includes('matrix'),
 
-  } catch (error) {
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        error: error.message
+        subtitleLinks:
+          html.includes('/subs/'),
+
+        captcha:
+          html
+            .toLowerCase()
+            .includes('captcha'),
+
+        cloudflare:
+          html
+            .toLowerCase()
+            .includes('cloudflare'),
+
+        extractedLinks:
+          extractSubtitleLinks(
+            html
+          ).slice(0, 10)
       });
-  }
-});
 
-/*
- * START SERVER
- */
+    } catch (error) {
+      return res
+        .status(500)
+        .json({
+          ok: false,
+          error: error.message
+        });
+    }
+  }
+);
+
+/* =========================
+   START SERVER
+========================= */
 
 app.listen(
   PORT,
