@@ -43,8 +43,6 @@ app.get("/manifest.json", (req, res) => {
   types: ["movie", "series"],
   idPrefixes: ["tt"]
 });
-  });
-});
 
 /*
  * Forward the actual subtitle requests to the AI Studio app.
