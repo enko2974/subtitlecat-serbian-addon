@@ -110,6 +110,35 @@ app.get("/", (req, res) => {
 /* =========================
    SERVER
    ========================= */
+app.get("/test-subtitlecat", async (req, res) => {
+  try {
+    const url =
+      "https://subtitlecat.com/index.php?search=The%20Matrix%201999&show=1000";
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html"
+      }
+    });
+
+    const text = await response.text();
+
+    res.json({
+      ok: response.ok,
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      length: text.length,
+      containsMatrix: text.toLowerCase().includes("matrix")
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
+  }
+});
+
 
 const PORT = process.env.PORT || 3000;
 
