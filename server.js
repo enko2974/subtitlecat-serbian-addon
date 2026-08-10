@@ -2,9 +2,6 @@ const express = require("express");
 
 const app = express();
 
-const UPSTREAM =
-  "https://ais-dev-cn6q5ffycxqvz5s5vap4qy-683609148507.europe-west2.run.app";
-
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -17,16 +14,14 @@ app.use((req, res, next) => {
   next();
 });
 
-/*
- * Stremio manifest
- * Served DIRECTLY by Render.
- */
-app.get("/manifest.json", (req, res) => {
-  res.type("application/json");
+/* =========================
+   STREMIO MANIFEST
+   ========================= */
 
+app.get("/manifest.json", (req, res) => {
   res.json({
     id: "org.subtitlecat.serbianlatin",
-    version: "1.0.0",
+    version: "1.0.2",
     name: "SubtitleCat Serbian Latin",
     description:
       "SubtitleCat subtitles automatically translated to Serbian Latin",
@@ -36,97 +31,85 @@ app.get("/manifest.json", (req, res) => {
   });
 });
 
-/*
- * Proxy all Stremio subtitle requests to AI Studio.
- */
-app.get("/subtitles/:type/:id.json", async (req, res) => {
+/* =========================
+   GEMINI API TEST
+   ========================= */
+
+app.get("/test-gemini", async (req, res) => {
   try {
-    const target =
-      `${UPSTREAM}/subtitles/${req.params.type}/${req.params.id}.json`;
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    console.log("Proxying:", target);
+    if (!apiKey) {
+      return res.status(500).json({
+        ok: false,
+        error: "GEMINI_API_KEY is missing"
+      });
+    }
 
-    const response = await fetch(target, {
-      method: "GET",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: "Reply with exactly: GEMINI OK"
+                }
+              ]
+            }
+          ]
+        })
       }
-    });
-
-    const text = await response.text();
-
-    console.log("Upstream status:", response.status);
-    console.log("Upstream content-type:", response.headers.get("content-type"));
-
-    res.status(response.status);
-    res.setHeader(
-      "Content-Type",
-      response.headers.get("content-type") ||
-        "application/json; charset=utf-8"
     );
 
-    res.send(text);
+    const data = await response.json();
+
+    console.log("Gemini status:", response.status);
+    console.log("Gemini response:", JSON.stringify(data));
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        ok: false,
+        gemini: data
+      });
+    }
+
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    res.json({
+      ok: true,
+      message: text.trim(),
+      model: "gemini-3.5-flash"
+    });
+
   } catch (error) {
-    console.error("SUBTITLE PROXY ERROR:", error);
-    res.status(502).json({
-      error: "Subtitle proxy error",
-      message: error.message
+    console.error("GEMINI TEST ERROR:", error);
+
+    res.status(500).json({
+      ok: false,
+      error: error.message
     });
   }
 });
 
-/*
- * Proxy subtitle download/translation requests.
- */
-app.get("/api/subtitles/download", async (req, res) => {
-  try {
-    const query = new URLSearchParams();
+/* =========================
+   HOME / HEALTH CHECK
+   ========================= */
 
-    for (const [key, value] of Object.entries(req.query)) {
-      if (typeof value === "string") {
-        query.set(key, value);
-      }
-    }
-
-    const target =
-      `${UPSTREAM}/api/subtitles/download?${query.toString()}`;
-
-    console.log("Proxying subtitle download:", target);
-
-    const response = await fetch(target, {
-      method: "GET",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*"
-      }
-    });
-
-    const body = await response.arrayBuffer();
-
-    res.status(response.status);
-
-    const contentType = response.headers.get("content-type");
-
-    if (contentType) {
-      res.setHeader("Content-Type", contentType);
-    } else {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    }
-
-    res.send(Buffer.from(body));
-  } catch (error) {
-    console.error("DOWNLOAD PROXY ERROR:", error);
-    res.status(502).send("Subtitle download proxy error");
-  }
-});
-
-/*
- * Health check
- */
 app.get("/", (req, res) => {
   res.send("SubtitleCat Serbian Latin proxy is running.");
 });
+
+/* =========================
+   SERVER
+   ========================= */
 
 const PORT = process.env.PORT || 3000;
 
