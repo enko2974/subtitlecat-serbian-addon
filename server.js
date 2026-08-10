@@ -184,7 +184,7 @@ function extractSubtitleLinks(html) {
    TEST SEARCH
    ========================================= */
 
-aapp.get("/debug-subtitlecat", async (req, res) => {
+ app.get("/debug-subtitlecat", async (req, res) => {
   try {
     const url =
       "https://subtitlecat.com/index.php?search=The%20Matrix%201999&show=1000";
