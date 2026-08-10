@@ -44,7 +44,7 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     addon: 'SubtitleCat Serbian Latin',
-    version: '3.0.0'
+    version: '4.0.0'
   });
 });
 
@@ -55,11 +55,10 @@ app.get('/health', (req, res) => {
 app.get('/manifest.json', (req, res) => {
   res.json({
     id: 'org.subtitlecat.serbianlatin',
-    version: '3.0.0',
+    version: '4.0.0',
     name: 'SubtitleCat Serbian Latin',
     description: 'SubtitleCat subtitles translated to Serbian Latin',
     logo: 'https://www.stremio.com/website/stremio-logo-small.png',
-
     resources: [
       {
         name: 'subtitles',
@@ -67,7 +66,6 @@ app.get('/manifest.json', (req, res) => {
         idPrefixes: ['tt']
       }
     ],
-
     types: ['movie', 'series'],
     idPrefixes: ['tt']
   });
@@ -98,30 +96,6 @@ function getSeriesParts(id) {
 }
 
 /* =========================
-   FETCH JSON
-========================= */
-
-async function fetchJson(url) {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-      'Accept': 'application/json,text/plain,*/*'
-    },
-    redirect: 'follow'
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `HTTP ${response.status} for ${url}`
-    );
-  }
-
-  return await response.json();
-}
-
-/* =========================
    CINEMETA
 ========================= */
 
@@ -129,20 +103,26 @@ async function getMeta(type, id) {
   const cleanId = cleanImdbId(id);
 
   const url =
-    `${CINEMETA}/meta/` +
-    `${encodeURIComponent(type)}/` +
-    `${encodeURIComponent(cleanId)}.json`;
+    `${CINEMETA}/meta/${encodeURIComponent(type)}/${encodeURIComponent(cleanId)}.json`;
 
   console.log('CINEMETA:', url);
 
   try {
-    const data = await fetchJson(url);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json'
+      },
+      redirect: 'follow'
+    });
 
-    if (data && data.meta) {
-      return data.meta;
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
 
-    return null;
+    const data = await response.json();
+
+    return data && data.meta ? data.meta : null;
   } catch (error) {
     console.error(
       'CINEMETA ERROR:',
@@ -160,24 +140,21 @@ async function getMeta(type, id) {
 function buildSearchQueries(type, id, meta) {
   const queries = [];
 
-  let title = '';
+  const title =
+    meta && meta.name
+      ? String(meta.name)
+      : '';
+
   let year = '';
 
-  if (meta && meta.name) {
-    title = String(meta.name);
-  }
-
   if (meta && meta.releaseInfo) {
-    const releaseInfo =
-      String(meta.releaseInfo);
-
-    const yearMatch =
-      releaseInfo.match(
+    const match =
+      String(meta.releaseInfo).match(
         /\b(?:19|20)\d{2}\b/
       );
 
-    if (yearMatch) {
-      year = yearMatch[0];
+    if (match) {
+      year = match[0];
     }
   }
 
@@ -217,9 +194,7 @@ function buildSearchQueries(type, id, meta) {
     queries.push(title);
   }
 
-  return [
-    ...new Set(queries)
-  ]
+  return [...new Set(queries)]
     .filter(Boolean)
     .slice(0, 4);
 }
@@ -240,29 +215,105 @@ function absoluteUrl(link) {
 }
 
 /* =========================
-   EXTRACT SUBTITLE LINKS
+   EXTRACT LINKS
 ========================= */
 
 function extractSubtitleLinks(html) {
   const results = [];
 
-  const regex =
-    /href=["']([^"']*\/subs\/[^"']+\.html(?:\?[^"']*)?)["']/gi;
+  /*
+   * SubtitleCat may change its HTML structure.
+   *
+   * Instead of relying only on /subs/,
+   * inspect every href and select likely
+   * subtitle/detail pages.
+   */
+
+  const hrefRegex =
+    /href\s*=\s*["']([^"']+)["']/gi;
 
   let match;
 
-  while ((match = regex.exec(html)) !== null) {
+  while (
+    (match = hrefRegex.exec(html)) !== null
+  ) {
+    const rawLink =
+      match[1].trim();
+
+    if (!rawLink) {
+      continue;
+    }
+
     const link =
-      absoluteUrl(match[1]);
+      absoluteUrl(rawLink);
+
+    if (!link) {
+      continue;
+    }
+
+    /*
+     * Only keep SubtitleCat links.
+     */
 
     if (
-      link &&
+      !link.startsWith(
+        SUBTITLECAT
+      )
+    ) {
+      continue;
+    }
+
+    /*
+     * Ignore normal website pages.
+     */
+
+    if (
+      link.includes('/index.php')
+    ) {
+      continue;
+    }
+
+    if (
+      link.includes('#')
+    ) {
+      continue;
+    }
+
+    if (
+      link === SUBTITLECAT ||
+      link === `${SUBTITLECAT}/`
+    ) {
+      continue;
+    }
+
+    /*
+     * Look for common subtitle/detail
+     * URL patterns.
+     */
+
+    const lower =
+      link.toLowerCase();
+
+    const looksLikeSubtitle =
+      lower.includes('/subs/') ||
+      lower.includes('subtitle') ||
+      lower.includes('subtitles') ||
+      lower.includes('/subtitle/') ||
+      lower.endsWith('.html');
+
+    if (!looksLikeSubtitle) {
+      continue;
+    }
+
+    if (
       !results.includes(link)
     ) {
       results.push(link);
     }
 
-    if (results.length >= 40) {
+    if (
+      results.length >= 40
+    ) {
       break;
     }
   }
@@ -271,13 +322,12 @@ function extractSubtitleLinks(html) {
 }
 
 /* =========================
-   SUBTITLECAT SEARCH
+   SEARCH SUBTITLECAT
 ========================= */
 
 async function searchSubtitleCat(query) {
   const url =
-    `${SUBTITLECAT}/index.php?search=` +
-    `${encodeURIComponent(query)}&show=1000`;
+    `${SUBTITLECAT}/index.php?search=${encodeURIComponent(query)}&show=1000`;
 
   console.log(
     'SUBTITLECAT SEARCH:',
@@ -285,8 +335,6 @@ async function searchSubtitleCat(query) {
   );
 
   const response = await fetch(url, {
-    method: 'GET',
-
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
@@ -315,11 +363,26 @@ async function searchSubtitleCat(query) {
     return [];
   }
 
-  return extractSubtitleLinks(html);
+  const links =
+    extractSubtitleLinks(html);
+
+  console.log(
+    'EXTRACTED LINKS:',
+    links.length
+  );
+
+  if (links.length > 0) {
+    console.log(
+      'FIRST LINKS:',
+      links.slice(0, 5)
+    );
+  }
+
+  return links;
 }
 
 /* =========================
-   TRANSLATOR DOWNLOAD URL
+   DOWNLOAD URL
 ========================= */
 
 function makeDownloadUrl(detailUrl) {
@@ -358,8 +421,6 @@ app.get(
         id
       );
 
-      /* Only movie and series */
-
       if (
         type !== 'movie' &&
         type !== 'series'
@@ -369,12 +430,11 @@ app.get(
         });
       }
 
-      /* Get metadata */
-
       const meta =
-        await getMeta(type, id);
-
-      /* Build search queries */
+        await getMeta(
+          type,
+          id
+        );
 
       let queries =
         buildSearchQueries(
@@ -383,7 +443,9 @@ app.get(
           meta
         );
 
-      /* Manual title */
+      /*
+       * Stremio may provide title
+       */
 
       if (req.query.title) {
         queries.unshift(
@@ -391,7 +453,9 @@ app.get(
         );
       }
 
-      /* Fallback */
+      /*
+       * Fallback
+       */
 
       if (queries.length === 0) {
         queries.push(
@@ -399,17 +463,18 @@ app.get(
         );
       }
 
+      queries =
+        [...new Set(queries)];
+
       console.log(
         'SEARCH QUERIES:',
         queries
       );
 
-      /* Search SubtitleCat */
-
       const links = [];
 
       for (
-        const query of [...new Set(queries)]
+        const query of queries
       ) {
         try {
           const found =
@@ -446,30 +511,20 @@ app.get(
         }
       }
 
-      console.log(
-        'SUBTITLES FOUND:',
-        links.length
-      );
-
-      /* Build Stremio subtitles */
-
       const subtitles = [];
 
       for (
-        let index = 0;
-        index < links.length;
-        index++
+        let i = 0;
+        i < links.length;
+        i++
       ) {
-        const detailUrl =
-          links[index];
-
         const subtitle = {
           id:
-            `subtitlecat-srp-${index}`,
+            `subtitlecat-srp-${i}`,
 
           url:
             makeDownloadUrl(
-              detailUrl
+              links[i]
             ),
 
           lang: 'srp',
@@ -490,7 +545,10 @@ app.get(
         );
       }
 
-      /* Cache */
+      console.log(
+        'SUBTITLES FOUND:',
+        subtitles.length
+      );
 
       res.setHeader(
         'Cache-Control',
@@ -498,7 +556,7 @@ app.get(
       );
 
       return res.json({
-        subtitles: subtitles
+        subtitles
       });
 
     } catch (error) {
@@ -507,11 +565,9 @@ app.get(
         error
       );
 
-      return res
-        .status(200)
-        .json({
-          subtitles: []
-        });
+      return res.status(200).json({
+        subtitles: []
+      });
     }
   }
 );
@@ -537,25 +593,23 @@ app.get(
 
       return res.json({
         ok: true,
-        query: query,
+        query,
         resultsFound:
           links.length,
         results: links
       });
 
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message
+      });
     }
   }
 );
 
 /* =========================
-   TEST TRANSLATOR
+   TEST SUBTITLE
 ========================= */
 
 app.get(
@@ -568,13 +622,11 @@ app.get(
         );
 
       if (!detailUrl) {
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error:
-              'Missing detailUrl'
-          });
+        return res.status(400).json({
+          ok: false,
+          error:
+            'Missing detailUrl'
+        });
       }
 
       const url =
@@ -589,11 +641,10 @@ app.get(
 
       const response =
         await fetch(url, {
-          method: 'GET',
-
           headers: {
             'User-Agent':
               'Mozilla/5.0',
+
             'Accept':
               '*/*'
           },
@@ -623,12 +674,10 @@ app.get(
       });
 
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message
+      });
     }
   }
 );
@@ -642,13 +691,10 @@ app.get(
   async (req, res) => {
     try {
       const url =
-        `${SUBTITLECAT}/index.php?` +
-        `search=The%20Matrix%201999&show=1000`;
+        `${SUBTITLECAT}/index.php?search=The%20Matrix%201999&show=1000`;
 
       const response =
         await fetch(url, {
-          method: 'GET',
-
           headers: {
             'User-Agent':
               'Mozilla/5.0'
@@ -659,6 +705,11 @@ app.get(
 
       const html =
         await response.text();
+
+      const extracted =
+        extractSubtitleLinks(
+          html
+        );
 
       return res.json({
         ok: true,
@@ -696,24 +747,20 @@ app.get(
             .includes('cloudflare'),
 
         extractedLinks:
-          extractSubtitleLinks(
-            html
-          ).slice(0, 10)
+          extracted.slice(0, 10)
       });
 
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message
+      });
     }
   }
 );
 
 /* =========================
-   START SERVER
+   START
 ========================= */
 
 app.listen(
