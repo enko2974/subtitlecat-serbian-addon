@@ -184,7 +184,7 @@ function extractSubtitleLinks(html) {
    TEST SEARCH
    ========================================= */
 
-app.get("/debug-subtitlecat", async (req, res) => {
+aapp.get("/debug-subtitlecat", async (req, res) => {
   try {
     const url =
       "https://subtitlecat.com/index.php?search=The%20Matrix%201999&show=1000";
@@ -193,20 +193,51 @@ app.get("/debug-subtitlecat", async (req, res) => {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
-        "Accept": "text/html"
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
     });
 
     const html = await response.text();
 
-    const matches = html.match(/.{0,250}\/subs\/.{0,500}/gi) || [];
+    const lower = html.toLowerCase();
+
+    const words = [
+      "matrix",
+      "cookie",
+      "captcha",
+      "cloudflare",
+      "subtitle",
+      "search",
+      "result",
+      "javascript"
+    ];
+
+    const found = {};
+
+    for (const word of words) {
+      found[word] = lower.includes(word);
+    }
+
+    const matrixPos = lower.indexOf("matrix");
+
+    let context = "";
+
+    if (matrixPos >= 0) {
+      context = html.substring(
+        Math.max(0, matrixPos - 1000),
+        Math.min(html.length, matrixPos + 3000)
+      );
+    }
 
     res.json({
       ok: true,
       status: response.status,
+      contentType: response.headers.get("content-type"),
       htmlLength: html.length,
-      matchesFound: matches.length,
-      matches: matches.slice(0, 10)
+      found,
+      matrixPosition: matrixPos,
+      context
     });
 
   } catch (error) {
@@ -216,7 +247,6 @@ app.get("/debug-subtitlecat", async (req, res) => {
     });
   }
 });
-
 
 /* =========================================
    GET SUBTITLECAT DETAIL PAGE
