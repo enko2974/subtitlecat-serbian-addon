@@ -184,28 +184,32 @@ function extractSubtitleLinks(html) {
    TEST SEARCH
    ========================================= */
 
-app.get("/test-search", async (req, res) => {
+app.get("/debug-subtitlecat", async (req, res) => {
   try {
-    const query =
-      req.query.q || "The Matrix 1999";
+    const url =
+      "https://subtitlecat.com/index.php?search=The%20Matrix%201999&show=1000";
 
-    const html =
-      await searchSubtitleCat(query);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
+        "Accept": "text/html"
+      }
+    });
 
-    const results =
-      extractSubtitleLinks(html);
+    const html = await response.text();
+
+    const matches = html.match(/.{0,250}\/subs\/.{0,500}/gi) || [];
 
     res.json({
       ok: true,
-      query,
+      status: response.status,
       htmlLength: html.length,
-      resultsFound: results.length,
-      results: results.slice(0, 20)
+      matchesFound: matches.length,
+      matches: matches.slice(0, 10)
     });
 
   } catch (error) {
-    console.error(error);
-
     res.status(500).json({
       ok: false,
       error: error.message
