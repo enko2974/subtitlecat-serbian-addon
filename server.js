@@ -2,125 +2,175 @@ const express = require("express");
 
 const app = express();
 
-const PORT = process.env.PORT || 10000;
+const PORT = Number(process.env.PORT) || 10000;
 
-const SUBTITLECAT = "https://subtitlecat.com";
-const CINEMETA = "https://v3-cinemeta.strem.io";
+const UPSTREAM =
+  "https://ais-dev-cn6q5ffycxqvz5s5vap4qy-683609148507.europe-west2.run.app";
+
+const CINEMETA =
+  "https://v3-cinemeta.strem.io";
 
 
-// ============================================================
-// CORS
-// ============================================================
+/* =========================================================
+   CORS
+   ========================================================= */
 
 app.use(function (req, res, next) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader(
     "Access-Control-Allow-Methods",
-    "GET, POST, OPTIONS"
+    "GET, OPTIONS"
   );
-  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "*"
+  );
 
   if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
+    return res.sendStatus(204);
   }
 
   next();
 });
 
 
-// ============================================================
-// HOME
-// ============================================================
+/* =========================================================
+   HOME
+   ========================================================= */
 
 app.get("/", function (req, res) {
-  res.send(
+  res.type("text/plain").send(
     "SubtitleCat Serbian Latin addon is running."
   );
 });
 
 
-// ============================================================
-// MANIFEST
-// ============================================================
+/* =========================================================
+   MANIFEST
+   ========================================================= */
 
 app.get("/manifest.json", function (req, res) {
   res.json({
     id: "org.subtitlecat.serbianlatin",
-    version: "2.2.0",
+    version: "3.0.0",
     name: "SubtitleCat Serbian Latin",
     description:
-      "SubtitleCat subtitles translated to Serbian Latin",
+      "Serbian Latin subtitles via SubtitleCat translation service",
+
+    logo:
+      "https://www.stremio.com/website/stremio-logo-small.png",
 
     resources: [
-      {
-        name: "subtitles",
-        types: ["movie", "series"],
-        idPrefixes: ["tt"]
-      }
+      "subtitles"
     ],
 
-    types: ["movie", "series"],
-    idPrefixes: ["tt"]
+    types: [
+      "movie",
+      "series"
+    ],
+
+    idPrefixes: [
+      "tt"
+    ]
   });
 });
 
 
-// ============================================================
-// GET MOVIE / SERIES TITLE FROM CINEMETA
-// ============================================================
+/* =========================================================
+   PARSE STREMIO ID
+   ========================================================= */
 
-async function getTitle(type, id) {
+function parseStremioId(id) {
+
+  const parts =
+    String(id || "").split(":");
+
+  return {
+    imdbId: parts[0],
+    season: parts[1] || null,
+    episode: parts[2] || null
+  };
+}
+
+
+/* =========================================================
+   CINEMETA
+   Used mainly for debugging/fallback information.
+   ========================================================= */
+
+async function getCinemetaTitle(type, id) {
+
   try {
-    // Remove possible :season:episode parts
-    const cleanId = id.split(":")[0];
+
+    const parsed =
+      parseStremioId(id);
 
     const url =
       CINEMETA +
       "/meta/" +
-      type +
+      encodeURIComponent(type) +
       "/" +
-      cleanId +
+      encodeURIComponent(parsed.imdbId) +
       ".json";
 
-    console.log("CINEMETA:", url);
-
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-      }
-    });
-
     console.log(
-      "CINEMETA STATUS:",
-      response.status
+      "CINEMETA REQUEST:",
+      url
     );
 
+    const response =
+      await fetch(url, {
+        headers: {
+          "User-Agent":
+            "SubtitleCat-Serbian-Latin/3.0",
+          "Accept":
+            "application/json"
+        }
+      });
+
     if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-
-    if (!data || !data.meta) {
-      return null;
-    }
-
-    let title = data.meta.name || "";
-
-    const releaseInfo =
-      data.meta.releaseInfo || "";
-
-    const yearMatch =
-      String(releaseInfo).match(
-        /\b(19|20)\d{2}\b/
+      console.log(
+        "CINEMETA STATUS:",
+        response.status
       );
 
-    if (yearMatch) {
-      title += " " + yearMatch[0];
+      return null;
     }
 
-    return title.trim();
+    const data =
+      await response.json();
+
+    if (
+      !data ||
+      !data.meta
+    ) {
+      return null;
+    }
+
+    let title =
+      data.meta.name || "";
+
+    const releaseInfo =
+      String(
+        data.meta.releaseInfo || ""
+      );
+
+    const yearMatch =
+      releaseInfo.match(
+        /\b(?:19|20)\d{2}\b/
+      );
+
+    if (
+      yearMatch &&
+      !title.includes(yearMatch[0])
+    ) {
+      title =
+        title +
+        " " +
+        yearMatch[0];
+    }
+
+    return title.trim() || null;
 
   } catch (error) {
 
@@ -134,222 +184,215 @@ async function getTitle(type, id) {
 }
 
 
-// ============================================================
-// SEARCH SUBTITLECAT
-// ============================================================
+/* =========================================================
+   FETCH SUBTITLES FROM UPSTREAM
+   ========================================================= */
 
-async function searchSubtitleCat(title) {
+async function fetchUpstreamSubtitles(
+  type,
+  id
+) {
 
   const url =
-    SUBTITLECAT +
-    "/index.php?search=" +
-    encodeURIComponent(title) +
-    "&show=1000";
+    UPSTREAM +
+    "/subtitles/" +
+    encodeURIComponent(type) +
+    "/" +
+    encodeURIComponent(id) +
+    ".json";
 
   console.log(
-    "SUBTITLECAT SEARCH:",
+    "UPSTREAM SUBTITLE REQUEST:",
     url
   );
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-      "Accept":
-        "text/html,application/xhtml+xml"
-    }
-  });
+  const response =
+    await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
 
-  const html =
+        "Accept":
+          "application/json, text/plain, */*"
+      }
+    });
+
+  const text =
     await response.text();
 
   console.log(
-    "SUBTITLECAT STATUS:",
+    "UPSTREAM STATUS:",
     response.status
   );
 
   console.log(
-    "HTML LENGTH:",
-    html.length
+    "UPSTREAM CONTENT TYPE:",
+    response.headers.get(
+      "content-type"
+    )
   );
-
-
-  // IMPORTANT:
-  // Correct regular expression.
-  //
-  // The old version contained:
-  //
-  // (\[^%22']*subs/\[^%22']+
-  //
-  // which is INVALID JavaScript regex.
-  //
-  // This version is correct:
-  //
-
-  const regex =
-    /href=["']([^"']*\/subs\/[^"']+\.html)["']/gi;
-
-
-  const results = [];
-
-  let match;
-
-  while (
-    (match = regex.exec(html)) !== null
-  ) {
-
-    let link = match[1];
-
-    // Convert relative URL to absolute
-    if (!link.startsWith("http")) {
-
-      link =
-        SUBTITLECAT +
-        "/" +
-        link.replace(/^\/+/, "");
-    }
-
-    // Avoid duplicates
-    if (!results.includes(link)) {
-      results.push(link);
-    }
-
-    // Maximum 30 subtitles
-    if (results.length >= 30) {
-      break;
-    }
-  }
-
 
   console.log(
-    "SUBTITLECAT RESULTS:",
-    results.length
+    "UPSTREAM LENGTH:",
+    text.length
   );
 
-  return results;
+  if (!response.ok) {
+
+    throw new Error(
+      "Upstream returned HTTP " +
+      response.status
+    );
+  }
+
+  let data;
+
+  try {
+
+    data =
+      JSON.parse(text);
+
+  } catch (error) {
+
+    throw new Error(
+      "Upstream did not return valid JSON"
+    );
+  }
+
+  return data;
 }
 
 
-// ============================================================
-// STREMIO SUBTITLE ENDPOINT
-// ============================================================
+/* =========================================================
+   NORMALIZE SUBTITLES
+   ========================================================= */
+
+function normalizeSubtitleList(data) {
+
+  if (
+    !data ||
+    !Array.isArray(data.subtitles)
+  ) {
+    return [];
+  }
+
+  return data.subtitles
+    .filter(function (item) {
+
+      return (
+        item &&
+        item.url
+      );
+
+    })
+    .map(function (item, index) {
+
+      return {
+
+        id:
+          String(
+            item.id ||
+            "subtitlecat-" +
+            index
+          ),
+
+        url:
+          String(item.url),
+
+        lang:
+          "srp",
+
+        label:
+          "🇷🇸 Serbian Latin"
+      };
+
+    });
+}
+
+
+/* =========================================================
+   STREMIO SUBTITLE ENDPOINT
+   ========================================================= */
 
 app.get(
   "/subtitles/:type/:id.json",
   async function (req, res) {
 
+    const type =
+      req.params.type;
+
+    const id =
+      req.params.id;
+
+    console.log(
+      "========================================"
+    );
+
+    console.log(
+      "STREMIO SUBTITLE REQUEST"
+    );
+
+    console.log(
+      "TYPE:",
+      type
+    );
+
+    console.log(
+      "ID:",
+      id
+    );
+
+
+    /* -----------------------------------------
+       Validate type
+       ----------------------------------------- */
+
+    if (
+      type !== "movie" &&
+      type !== "series"
+    ) {
+
+      return res.json({
+        subtitles: []
+      });
+    }
+
+
+    /* -----------------------------------------
+       Validate IMDb ID
+       ----------------------------------------- */
+
+    if (
+      !String(id).startsWith("tt")
+    ) {
+
+      return res.json({
+        subtitles: []
+      });
+    }
+
+
     try {
 
-      const type =
-        req.params.type;
+      /*
+       * The important part:
+       *
+       * We directly call the upstream service
+       * that already produced the Serbian Latin
+       * SubtitleCat results.
+       */
 
-      const id =
-        req.params.id;
-
-
-      console.log(
-        "================================"
-      );
-
-      console.log(
-        "STREMIO REQUEST"
-      );
-
-      console.log(
-        "TYPE:",
-        type
-      );
-
-      console.log(
-        "ID:",
-        id
-      );
-
-
-      // --------------------------------------------------------
-      // Get title from Cinemeta
-      // --------------------------------------------------------
-
-      let title =
-        await getTitle(
+      const upstreamData =
+        await fetchUpstreamSubtitles(
           type,
           id
         );
 
 
-      // Allow manual title
-      // for testing
-      if (req.query.title) {
-        title =
-          req.query.title;
-      }
-
-
-      if (!title) {
-        title =
-          "The Matrix 1999";
-      }
-
-
-      console.log(
-        "TITLE:",
-        title
-      );
-
-
-      // --------------------------------------------------------
-      // Search SubtitleCat
-      // --------------------------------------------------------
-
-      const links =
-        await searchSubtitleCat(
-          title
+      const subtitles =
+        normalizeSubtitleList(
+          upstreamData
         );
-
-
-      const subtitles = [];
-
-
-      // --------------------------------------------------------
-      // Create Stremio subtitle objects
-      // --------------------------------------------------------
-
-      for (
-        let i = 0;
-        i < links.length;
-        i++
-      ) {
-
-        const detailUrl =
-          links[i];
-
-
-        const downloadUrl =
-          "https://" +
-          req.get("host") +
-          "/api/subtitles/download?detailUrl=" +
-          encodeURIComponent(
-            detailUrl
-          );
-
-
-        subtitles.push({
-
-          id:
-            "subtitlecat-" +
-            i,
-
-          url:
-            downloadUrl,
-
-          lang:
-            "srp",
-
-          label:
-            "🇷🇸 Serbian Latin"
-
-        });
-      }
 
 
       console.log(
@@ -358,13 +401,12 @@ app.get(
       );
 
 
-      // --------------------------------------------------------
-      // Stremio response
-      // --------------------------------------------------------
+      /* ---------------------------------------
+         Return subtitles to Stremio
+         --------------------------------------- */
 
-      res.json({
-        subtitles:
-          subtitles
+      return res.json({
+        subtitles: subtitles
       });
 
 
@@ -372,21 +414,26 @@ app.get(
 
       console.error(
         "SUBTITLE ERROR:",
-        error
+        error.message
       );
 
+      /*
+       * Stremio expects valid JSON.
+       * Never return broken HTML here.
+       */
 
-      res.status(500).json({
+      return res.json({
         subtitles: []
       });
     }
+
   }
 );
 
 
-// ============================================================
-// SUBTITLE DOWNLOAD PROXY
-// ============================================================
+/* =========================================================
+   DOWNLOAD PROXY
+   ========================================================= */
 
 app.get(
   "/api/subtitles/download",
@@ -397,8 +444,15 @@ app.get(
       const detailUrl =
         req.query.detailUrl;
 
+      const name =
+        req.query.name ||
+        "subtitle.srt";
 
-      if (!detailUrl) {
+
+      if (
+        !detailUrl ||
+        typeof detailUrl !== "string"
+      ) {
 
         return res
           .status(400)
@@ -408,200 +462,96 @@ app.get(
       }
 
 
-      console.log(
-        "================================"
-      );
+      const target =
+        new URL(detailUrl);
+
+
+      /*
+       * Security:
+       * only allow our upstream service
+       * and SubtitleCat.
+       */
+
+      const allowedHosts =
+        new Set([
+          new URL(UPSTREAM).hostname,
+          "subtitlecat.com",
+          "www.subtitlecat.com"
+        ]);
+
+
+      if (
+        !allowedHosts.has(
+          target.hostname
+        )
+      ) {
+
+        return res
+          .status(403)
+          .send(
+            "Host not allowed"
+          );
+      }
+
 
       console.log(
-        "DETAIL URL:",
-        detailUrl
+        "DOWNLOAD PROXY:",
+        target.href
       );
 
-
-      // --------------------------------------------------------
-      // Download SubtitleCat detail page
-      // --------------------------------------------------------
 
       const response =
         await fetch(
-          detailUrl,
+          target.href,
           {
             headers: {
               "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
 
               "Accept":
-                "text/html,application/xhtml+xml"
+                "*/*"
             }
           }
         );
 
 
-      const html =
-        await response.text();
+      const body =
+        Buffer.from(
+          await response.arrayBuffer()
+        );
 
 
-      console.log(
-        "DETAIL STATUS:",
+      res.status(
         response.status
       );
 
 
-      console.log(
-        "DETAIL LENGTH:",
-        html.length
-      );
-
-
-      // --------------------------------------------------------
-      // Look for subtitle file
-      // --------------------------------------------------------
-
-      const patterns = [
-
-        /href=["']([^"']+\.srt[^"']*)["']/gi,
-
-        /href=["']([^"']+\.vtt[^"']*)["']/gi,
-
-        /href=["']([^"']*download[^"']*)["']/gi
-
-      ];
-
-
-      let subtitleUrl =
-        null;
-
-
-      // --------------------------------------------------------
-      // Find subtitle URL
-      // --------------------------------------------------------
-
-      for (
-        const pattern of patterns
-      ) {
-
-        const match =
-          pattern.exec(html);
-
-
-        if (
-          match &&
-          match[1]
-        ) {
-
-          subtitleUrl =
-            match[1];
-
-
-          // Convert relative URL
-          // into absolute URL
-
-          if (
-            !subtitleUrl.startsWith(
-              "http"
-            )
-          ) {
-
-            subtitleUrl =
-              new URL(
-                subtitleUrl,
-                detailUrl
-              ).href;
-          }
-
-
-          break;
-        }
-      }
-
-
-      // --------------------------------------------------------
-      // No subtitle file found
-      // --------------------------------------------------------
-
-      if (!subtitleUrl) {
-
-        console.log(
-          "NO SUBTITLE FILE LINK"
-        );
-
-
-        return res
-          .status(404)
-          .send(
-            "Subtitle file not found"
-          );
-      }
-
-
-      console.log(
-        "SUBTITLE FILE:",
-        subtitleUrl
-      );
-
-
-      // --------------------------------------------------------
-      // Download actual subtitle
-      // --------------------------------------------------------
-
-      const subtitleResponse =
-        await fetch(
-          subtitleUrl,
-          {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0"
-            }
-          }
-        );
-
-
-      console.log(
-        "SUBTITLE STATUS:",
-        subtitleResponse.status
-      );
-
-
-      if (
-        !subtitleResponse.ok
-      ) {
-
-        return res
-          .status(
-            subtitleResponse.status
-          )
-          .send(
-            "Subtitle download failed"
-          );
-      }
-
-
-      const body =
-        await subtitleResponse.arrayBuffer();
-
-
-      // --------------------------------------------------------
-      // Return subtitle to Stremio
-      // --------------------------------------------------------
-
-      res.status(200);
-
-
       res.setHeader(
         "Content-Type",
+        response.headers.get(
+          "content-type"
+        ) ||
         "text/plain; charset=utf-8"
       );
 
 
+      const safeName =
+        String(name)
+          .replace(
+            /[^a-zA-Z0-9._-]/g,
+            "_"
+          );
+
+
       res.setHeader(
         "Content-Disposition",
-        'inline; filename="subtitle.srt"'
+        'inline; filename="' +
+        safeName +
+        '"'
       );
 
 
-      res.send(
-        Buffer.from(body)
-      );
+      return res.send(body);
 
 
     } catch (error) {
@@ -611,20 +561,20 @@ app.get(
         error.message
       );
 
-
-      res
+      return res
         .status(502)
         .send(
           "Subtitle download proxy error"
         );
     }
+
   }
 );
 
 
-// ============================================================
-// TEST SEARCH
-// ============================================================
+/* =========================================================
+   TEST ENDPOINT
+   ========================================================= */
 
 app.get(
   "/test-search",
@@ -632,138 +582,143 @@ app.get(
 
     try {
 
-      const q =
-        req.query.q ||
-        "The Matrix 1999";
+      const type =
+        req.query.type ||
+        "movie";
+
+      const id =
+        req.query.id ||
+        "tt0133093";
 
 
-      const results =
-        await searchSubtitleCat(
-          q
+      const data =
+        await fetchUpstreamSubtitles(
+          type,
+          id
         );
 
 
-      res.json({
+      const subtitles =
+        normalizeSubtitleList(
+          data
+        );
+
+
+      return res.json({
 
         ok: true,
 
-        query: q,
+        type: type,
 
-        resultsFound:
-          results.length,
+        id: id,
 
-        results:
-          results
+        subtitlesFound:
+          subtitles.length,
+
+        subtitles:
+          subtitles
 
       });
 
 
     } catch (error) {
 
-      res.status(500).json({
+      return res
+        .status(502)
+        .json({
 
-        ok: false,
+          ok: false,
 
-        error:
-          error.message
+          error:
+            error.message
 
-      });
+        });
     }
+
   }
 );
 
 
-// ============================================================
-// DEBUG
-// ============================================================
+/* =========================================================
+   DEBUG
+   ========================================================= */
 
 app.get(
   "/debug",
   async function (req, res) {
 
+    const result = {
+
+      ok: true,
+
+      addon:
+        "SubtitleCat Serbian Latin",
+
+      version:
+        "3.0.0",
+
+      node:
+        process.version,
+
+      upstream:
+        UPSTREAM
+
+    };
+
+
     try {
 
-      const url =
-        SUBTITLECAT +
-        "/index.php?search=The%20Matrix%201999&show=1000";
-
-
-      const response =
-        await fetch(
-          url,
-          {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0"
-            }
-          }
+      const data =
+        await fetchUpstreamSubtitles(
+          "movie",
+          "tt0133093"
         );
 
 
-      const html =
-        await response.text();
+      const subtitles =
+        normalizeSubtitleList(
+          data
+        );
 
 
-      res.json({
+      result.matrix = {
 
-        ok: true,
+        subtitlesFound:
+          subtitles.length,
 
-        status:
-          response.status,
+        first:
+          subtitles.length > 0
+            ? subtitles[0]
+            : null
 
-        contentType:
-          response.headers.get(
-            "content-type"
-          ),
-
-        htmlLength:
-          html.length,
-
-        matrix:
-          html.includes(
-            "Matrix"
-          ),
-
-        subtitleLinks:
-          html.includes(
-            "subs/"
-          ),
-
-        captcha:
-          html
-            .toLowerCase()
-            .includes(
-              "captcha"
-            ),
-
-        cloudflare:
-          html
-            .toLowerCase()
-            .includes(
-              "cloudflare"
-            )
-
-      });
+      };
 
 
     } catch (error) {
 
-      res.status(500).json({
+      result.matrix = {
 
-        ok: false,
+        subtitlesFound:
+          0,
 
         error:
           error.message
 
-      });
+      };
     }
+
+
+    return res.json(
+      result
+    );
+
   }
 );
 
 
-// ============================================================
-// START SERVER
-// ============================================================
+/* =========================================================
+   START SERVER
+   ========================================================= */
 
 app.listen(
   PORT,
@@ -777,4 +732,3 @@ app.listen(
 
   }
 );
-```
