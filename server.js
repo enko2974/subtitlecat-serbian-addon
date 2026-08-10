@@ -200,44 +200,30 @@ function extractSubtitleLinks(html) {
 
     const html = await response.text();
 
-    const lower = html.toLowerCase();
+    const links = [];
 
-    const words = [
-      "matrix",
-      "cookie",
-      "captcha",
-      "cloudflare",
-      "subtitle",
-      "search",
-      "result",
-      "javascript"
-    ];
+    const regex = /href\s*=\s*["']([^"']+)["']/gi;
 
-    const found = {};
+    let match;
 
-    for (const word of words) {
-      found[word] = lower.includes(word);
-    }
+    while ((match = regex.exec(html)) !== null) {
+      const href = match[1];
 
-    const matrixPos = lower.indexOf("matrix");
-
-    let context = "";
-
-    if (matrixPos >= 0) {
-      context = html.substring(
-        Math.max(0, matrixPos - 1000),
-        Math.min(html.length, matrixPos + 3000)
-      );
+      if (
+        href.toLowerCase().includes("subtitle") ||
+        href.toLowerCase().includes(".html") ||
+        href.toLowerCase().includes("/subs/")
+      ) {
+        links.push(href);
+      }
     }
 
     res.json({
       ok: true,
       status: response.status,
-      contentType: response.headers.get("content-type"),
       htmlLength: html.length,
-      found,
-      matrixPosition: matrixPos,
-      context
+      linksFound: links.length,
+      links: links.slice(0, 100)
     });
 
   } catch (error) {
