@@ -17,27 +17,30 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/manifest.json", async (req, res) => {
-  try {
-    const response = await fetch(`${UPSTREAM}/manifest.json`);
+/*
+ * IMPORTANT:
+ * Serve the Stremio manifest DIRECTLY from Render.
+ * Do NOT fetch it from AI Studio because AI Studio may
+ * return its cookie-check page instead of JSON.
+ */
+app.get("/manifest.json", (req, res) => {
+  res.status(200);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
 
-    const text = await response.text();
-
-    res.status(response.status);
-    res.setHeader(
-      "Content-Type",
-      "application/json; charset=utf-8"
-    );
-
-    res.send(text);
-  } catch (error) {
-    console.error(error);
-    res.status(502).json({
-      error: "Unable to reach addon server"
-    });
-  }
+  res.json({
+    id: "org.subtitlecat.serbianlatin",
+    version: "1.0.0",
+    name: "SubtitleCat Serbian Latin",
+    description: "SubtitleCat subtitles automatically translated to Serbian Latin",
+    resources: ["subtitles"],
+    types: ["movie", "series"],
+    idPrefixes: ["tt"]
+  });
 });
 
+/*
+ * Forward the actual subtitle requests to the AI Studio app.
+ */
 app.use(async (req, res) => {
   try {
     const target = `${UPSTREAM}${req.originalUrl}`;
@@ -45,7 +48,7 @@ app.use(async (req, res) => {
     const response = await fetch(target, {
       method: req.method,
       headers: {
-        "User-Agent": "Stremio-SubtitleCat-Proxy",
+        "User-Agent": "Mozilla/5.0",
         "Accept": req.headers.accept || "*/*"
       }
     });
@@ -70,5 +73,5 @@ app.use(async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Proxy running on port ${PORT}`);
+  console.log(`SubtitleCat Stremio proxy running on port ${PORT}`);
 });
