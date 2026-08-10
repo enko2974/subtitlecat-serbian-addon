@@ -32,9 +32,9 @@ app.get("/manifest.json", (req, res) => {
 
   res.json({
     id: "org.subtitlecat.serbianlatin",
-    version: "1.0.1",
-    name: "SubtitleCat Serbian Latin TEST",
-    description: "SubtitleCat Serbian Latin - Render TEST",
+    version: "1.0.0",
+    name: "SubtitleCat Serbian Latin",
+    description: "SubtitleCat subtitles automatically translated to Serbian Latin",
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"]
