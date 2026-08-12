@@ -7,6 +7,7 @@ const PORT = Number(process.env.PORT) || 10000;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.disable('x-powered-by');
+app.set('trust proxy', true);
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -25,7 +26,7 @@ app.get('/manifest.json', (req, res) => {
     id: 'org.subtitlecat.serbianlatin.ai',
     version: '6.0.0',
     name: 'SubtitleCat Serbian (Gemini AI)',
-    description: 'Automatic SubtitleCat to Serbian Latin translation via Gemini AI',
+    description: 'Automatic translation via Gemini AI',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     idPrefixes: ['tt']
@@ -34,19 +35,14 @@ app.get('/manifest.json', (req, res) => {
 
 async function translateToSerbian(subtitleText) {
   try {
-    const prompt = `Преведи го или прилагоди го следниов текст (SRT/VTT формат) исклучиво на СРПСКА ЛАТИНИЦА (со користење на карактерите č, ć, ž, š, đ).
-ПРАВИЛА:
-1. Задолжително задржи ги сите временски ознаки (timestamps) и броевите на редовите непроменети.
-2. Не додавај воведни зборови, врати само чист преведен титл.
-
-Еве го текстот:
-${subtitleText}`;
+    const prompt = `Преведи го следниов текст (SRT/VTT формат) исклучиво на СРПСКА ЛАТИНИЦА (č, ć, ž, š, đ). 
+Задолжително задржи ги временските ознаки и броевите.
+\n${subtitleText}`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
     });
-
     return response.text || subtitleText;
   } catch (error) {
     console.error('GEMINI ERROR:', error.message);
@@ -54,19 +50,19 @@ ${subtitleText}`;
   }
 }
 
-app.get('/subtitles/:type/:id.json', async (req, res) => {
+// Оваа функција ги опслужува сите барања од Stremio
+const handleSubtitles = async (req, res) => {
   const { type, id } = req.params;
-  console.log(`=== LIVE REQUEST RECEIVED FROM STREMIO: ${type} ${id} ===`);
+  console.log(`=== LIVE REQUEST: ${type} ${id} ===`);
 
   const host = req.get('host');
-  const protocol = req.protocol;
-
+  // Го форсираме https линкот кој ќе го користи Stremio
   const directSubUrl = `https://subtitle-cat.com/subs/${id}/en.vtt`;
 
   const subtitles = [
     {
-      id: `sub-gemini-serbian-${id}`,
-      url: `${protocol}://${host}/translate-sub.srt?url=${encodeURIComponent(directSubUrl)}`,
+      id: `sub-gemini-${id}`,
+      url: `https://${host}/translate-sub.srt?url=${encodeURIComponent(directSubUrl)}`,
       lang: 'srp',
       label: '🇷🇸 Serbian Latin (Gemini AI)'
     }
@@ -74,7 +70,11 @@ app.get('/subtitles/:type/:id.json', async (req, res) => {
 
   res.setHeader('Cache-Control', 'no-store');
   res.json({ subtitles });
-});
+};
+
+// ОВА БЕШЕ ГРЕШКАТА: Додадени се двете рути за да ги фаќаат барањата со и без videoHash!
+app.get('/subtitles/:type/:id.json', handleSubtitles);
+app.get('/subtitles/:type/:id/:extra.json', handleSubtitles);
 
 app.get('/translate-sub.srt', async (req, res) => {
   const subUrl = req.query.url;
