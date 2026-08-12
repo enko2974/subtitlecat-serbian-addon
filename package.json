@@ -1,16 +1,13 @@
 {
   "name": "subtitlecat-serbian-addon",
-  "version": "3.0.0",
-  "private": true,
-  "description": "Stremio addon providing Serbian Latin subtitles from SubtitleCat via a translation proxy",
+  "version": "6.0.0",
+  "description": "SubtitleCat Serbian Latin Addon via Gemini AI",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "engines": {
-    "node": ">=20"
-  },
   "dependencies": {
-    "express": "^4.21.2"
+    "@google/genai": "^0.1.1",
+    "express": "^4.19.2"
   }
 }
